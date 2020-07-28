@@ -10,7 +10,6 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.apache.commons.lang.math.NumberUtils;
-import org.bstats.bukkit.Metrics;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Location;
@@ -102,65 +101,6 @@ public class P extends JavaPlugin {
 			return;
 		}
 		readData();
-
-		// Setup Metrics
-		try {
-			Metrics metrics = new Metrics(this);
-			metrics.addCustomChart(new Metrics.SingleLineChart("drunk_players", BPlayer::numDrunkPlayers));
-			metrics.addCustomChart(new Metrics.SingleLineChart("brews_in_existence", () -> Brew.potions.size()));
-			metrics.addCustomChart(new Metrics.SingleLineChart("barrels_built", () -> Barrel.barrels.size()));
-			metrics.addCustomChart(new Metrics.SingleLineChart("cauldrons_boiling", () -> BCauldron.bcauldrons.size()));
-			metrics.addCustomChart(new Metrics.AdvancedPie("brew_quality", () -> {
-				Map<String, Integer> map = new HashMap<>(5);
-				int exc = 0;
-				int good = 0;
-				int norm = 0;
-				int bad = 0;
-				int terr = 0;
-				for (Brew brew : Brew.potions.values()) {
-					if (brew.getQuality() >= 9) {
-						exc++;
-					} else if (brew.getQuality() >= 7) {
-						good++;
-					} else if (brew.getQuality() >= 5) {
-						norm++;
-					} else if (brew.getQuality() >= 3) {
-						bad++;
-					} else {
-						terr++;
-					}
-				}
-
-				map.put("excellent", exc);
-				map.put("good", good);
-				map.put("normal", norm);
-				map.put("bad", bad);
-				map.put("terrible", terr);
-				return map;
-			}));
-			metrics.addCustomChart(new Metrics.SimplePie("number_of_recipes", () -> {
-				int recipes = BIngredients.recipes.size();
-				if (recipes < 7) {
-					return "Less than 7";
-				} else if (recipes < 11) {
-					return "7-10";
-				} else if (recipes == 11) {
-					// There are 11 default recipes, so show this as its own slice
-					return "11";
-				} else if (recipes <= 31) {
-					if (recipes % 2 == 0) {
-						return recipes + "-" + (recipes + 1);
-					} else {
-						return (recipes - 1) + "-" + recipes;
-					}
-				} else {
-					return "More than 31";
-				}
-
-			}));
-		} catch (Throwable e) {
-			e.printStackTrace();
-		}
 
 		// Listeners
 		blockListener = new BlockListener();
