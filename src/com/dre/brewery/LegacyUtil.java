@@ -1,10 +1,5 @@
 package com.dre.brewery;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.List;
-
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -17,6 +12,11 @@ import org.bukkit.material.Cauldron;
 import org.bukkit.material.MaterialData;
 import org.bukkit.material.Tree;
 import org.bukkit.material.Wood;
+
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 @SuppressWarnings("JavaReflectionMemberAccess")
 public class LegacyUtil {
