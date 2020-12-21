@@ -1,25 +1,27 @@
 package com.dre.brewery.filedata;
 
-import com.dre.brewery.LegacyUtil;
+import com.dre.brewery.utility.LegacyUtil;
+import com.dre.brewery.P;
+import org.bukkit.Material;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.bukkit.Material;
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.configuration.file.FileConfiguration;
-
-import com.dre.brewery.P;
-
 public class DataUpdater {
 
 	private FileConfiguration data;
 	private File file;
+	private File worldFile;
 
-	public DataUpdater(FileConfiguration data, File file) {
+	public DataUpdater(FileConfiguration data, File file, File worldFile) {
 		this.data = data;
 		this.file = file;
+		this.worldFile = worldFile;
 	}
 
 
@@ -27,7 +29,11 @@ public class DataUpdater {
 	public void update(String fromVersion) {
 		if (fromVersion.equalsIgnoreCase("1.0")) {
 			update10();
-			//fromVersion = "1.1";
+			fromVersion = "1.1";
+		}
+		if (fromVersion.equalsIgnoreCase("1.1")) {
+			update11();
+			//fromVersion = "1.2";
 		}
 
 		try {
@@ -40,7 +46,6 @@ public class DataUpdater {
 
 
 
-	@SuppressWarnings("deprecation")
 	public void update10() {
 
 		data.set("Version", DataSave.dataVersion);
@@ -102,6 +107,38 @@ public class DataUpdater {
 				P.p.errorLog("Error Converting Ingredient Section of Cauldrons, newer versions of Bukkit may not support the old Save File anymore:");
 				e.printStackTrace();
 			}
+		}
+	}
+
+	public void update11() {
+		data.set("Version", DataSave.dataVersion);
+
+		FileConfiguration worldData = new YamlConfiguration();
+		if (data.contains("BCauldron")) {
+			worldData.set("BCauldron", data.get("BCauldron"));
+			data.set("BCauldron", null);
+		}
+		if (data.contains("Barrel")) {
+			worldData.set("Barrel", data.get("Barrel"));
+			data.set("Barrel", null);
+		}
+		if (data.contains("Wakeup")) {
+			worldData.set("Wakeup", data.get("Wakeup"));
+			data.set("Wakeup", null);
+		}
+		if (data.contains("Worlds")) {
+			worldData.set("Worlds", data.get("Worlds"));
+			data.set("Worlds", null);
+		}
+
+		try {
+			worldData.save(worldFile);
+			File bkup = new File(P.p.getDataFolder(), "dataBackup.yml");
+			if (bkup.exists()) {
+				bkup.renameTo(new File(P.p.getDataFolder(), "worlddataBackup.yml"));
+			}
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 	}
 }

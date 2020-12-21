@@ -19,6 +19,7 @@ public class MCBarrel {
 	public static final byte OAK = 2;
 	public static final String TAG = "Btime";
 	public static int maxBrews = 6;
+	public static boolean enableAging = true;
 
 	public static long mcBarrelTime; // Globally stored Barrel time. Difference between this and the time stored on each mc-barrel will give the barrel age time
 	public static List<MCBarrel> openBarrels = new ArrayList<>();
@@ -57,7 +58,7 @@ public class MCBarrel {
 					for (ItemStack item : inv.getContents()) {
 						if (item != null) {
 							Brew brew = Brew.get(item);
-							if (brew != null) {
+							if (brew != null && !brew.isStatic()) {
 								if (brews < maxBrews || maxBrews < 0) {
 									// The time is in minutes, but brew.age() expects time in mc-days
 									brew.age(item, ((float) time) / 20f, OAK);
@@ -66,9 +67,11 @@ public class MCBarrel {
 							}
 						}
 					}
-					loadTime = System.nanoTime() - loadTime;
-					float ftime = (float) (loadTime / 1000000.0);
-					P.p.debugLog("opening MC Barrel with potions (" + ftime + "ms)");
+					if (P.debug) {
+						loadTime = System.nanoTime() - loadTime;
+						float ftime = (float) (loadTime / 1000000.0);
+						P.p.debugLog("opening MC Barrel with potions (" + ftime + "ms)");
+					}
 				}
 			}
 		}
@@ -80,8 +83,7 @@ public class MCBarrel {
 			// This is the last viewer
 			for (ItemStack item : inv.getContents()) {
 				if (item != null) {
-					Brew brew = Brew.get(item);
-					if (brew != null) {
+					if (Brew.isBrew(item)) {
 						// We found a brew, so set time on this Barrel
 						if (inv.getHolder() instanceof org.bukkit.block.Barrel) {
 							Barrel barrel = (Barrel) inv.getHolder();
@@ -94,6 +96,28 @@ public class MCBarrel {
 				}
 			}
 			// No Brew found, ignore this Barrel
+		}
+	}
+
+	public void countBrews() {
+		brews = 0;
+		for (ItemStack item : inv.getContents()) {
+			if (item != null) {
+				if (Brew.isBrew(item)) {
+					brews++;
+				}
+			}
+		}
+	}
+
+	public Inventory getInventory() {
+		return inv;
+	}
+
+
+	public static void onUpdate() {
+		if (enableAging) {
+			mcBarrelTime++;
 		}
 	}
 
@@ -113,11 +137,9 @@ public class MCBarrel {
 			case SWAP_WITH_CURSOR:
 				// Placing Brew in MC Barrel
 				if (event.getCursor() != null && event.getClickedInventory() != null && event.getClickedInventory().getType() == InventoryType.BARREL && event.getCursor().getType() == Material.POTION) {
-					Brew b = Brew.get(event.getCursor());
-					if (b != null) {
+					if (Brew.isBrew(event.getCursor())) {
 						if (event.getAction() == InventoryAction.SWAP_WITH_CURSOR && event.getCurrentItem() != null && event.getCurrentItem().getType() == Material.POTION) {
-							Brew bb = Brew.get(event.getCurrentItem());
-							if (bb != null) {
+							if (Brew.isBrew(event.getCurrentItem())) {
 								// The item we are swapping with is also a brew, dont change the count and allow
 								break;
 							}
@@ -130,8 +152,7 @@ public class MCBarrel {
 				if (event.getCurrentItem() != null && event.getCurrentItem().getType() == Material.POTION && event.getClickedInventory() != null) {
 					if (event.getClickedInventory().getType() == InventoryType.BARREL) {
 						// Moving Brew out of MC Barrel
-						Brew b = Brew.get(event.getCurrentItem());
-						if (b != null) {
+						if (Brew.isBrew(event.getCurrentItem())) {
 							if (brews == -1) {
 								countBrews();
 							}
@@ -140,8 +161,7 @@ public class MCBarrel {
 						break;
 					} else if (event.getClickedInventory().getType() == InventoryType.PLAYER) {
 						// Moving Brew into MC Barrel
-						Brew b = Brew.get(event.getCurrentItem());
-						if (b != null) {
+						if (Brew.isBrew(event.getCurrentItem())) {
 							adding = true;
 						}
 					}
@@ -155,8 +175,7 @@ public class MCBarrel {
 			case COLLECT_TO_CURSOR:
 				// Pickup Brew from MC Barrel
 				if (event.getCurrentItem() != null && event.getClickedInventory() != null && event.getClickedInventory().getType() == InventoryType.BARREL && event.getCurrentItem().getType() == Material.POTION) {
-					Brew b = Brew.get(event.getCurrentItem());
-					if (b != null) {
+					if (Brew.isBrew(event.getCurrentItem())) {
 						if (brews == -1) {
 							countBrews();
 						}
@@ -182,26 +201,6 @@ public class MCBarrel {
 				brews++;
 			}
 		}
-	}
-
-	public void countBrews() {
-		brews = 0;
-		for (ItemStack item : inv.getContents()) {
-			if (item != null) {
-				Brew brew = Brew.get(item);
-				if (brew != null) {
-					brews++;
-				}
-			}
-		}
-	}
-
-	public Inventory getInventory() {
-		return inv;
-	}
-
-	public static void onUpdate() {
-		mcBarrelTime++;
 	}
 
 }

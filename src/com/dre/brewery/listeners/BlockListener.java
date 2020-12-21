@@ -1,20 +1,22 @@
 package com.dre.brewery.listeners;
 
+import com.dre.brewery.BPlayer;
+import com.dre.brewery.BSealer;
+import com.dre.brewery.Barrel;
+import com.dre.brewery.DistortChat;
+import com.dre.brewery.P;
+import com.dre.brewery.api.events.barrel.BarrelDestroyEvent;
+import com.dre.brewery.filedata.BConfig;
+import com.dre.brewery.filedata.BData;
+import com.dre.brewery.integration.barrel.BlocklockerBarrel;
+import com.dre.brewery.utility.BUtil;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.BlockBurnEvent;
-import org.bukkit.event.block.BlockPistonExtendEvent;
-import org.bukkit.event.block.BlockPistonRetractEvent;
-import org.bukkit.event.block.SignChangeEvent;
-import org.bukkit.event.block.BlockBreakEvent;
-
-import com.dre.brewery.Barrel;
-import com.dre.brewery.BPlayer;
-import com.dre.brewery.Words;
-import com.dre.brewery.P;
+import org.bukkit.event.block.*;
 
 public class BlockListener implements Listener {
 
@@ -22,10 +24,14 @@ public class BlockListener implements Listener {
 	public void onSignChange(SignChangeEvent event) {
 		String[] lines = event.getLines();
 
-		if (lines[0].equalsIgnoreCase("Barrel") || lines[0].equalsIgnoreCase(P.p.languageReader.get("Etc_Barrel"))) {
+		if (hasBarrelLine(lines)) {
 			Player player = event.getPlayer();
 			if (!player.hasPermission("brewery.createbarrel.small") && !player.hasPermission("brewery.createbarrel.big")) {
 				P.p.msg(player, P.p.languageReader.get("Perms_NoBarrelCreate"));
+				return;
+			}
+			if (BData.dataMutex.get() > 0) {
+				P.p.msg(player, "§cCurrently loading Data");
 				return;
 			}
 			if (Barrel.create(event.getBlock(), player)) {
@@ -34,34 +40,58 @@ public class BlockListener implements Listener {
 		}
 	}
 
+	public static boolean hasBarrelLine(String[] lines) {
+		for (String line : lines) {
+			if (line.equalsIgnoreCase("Barrel") || line.equalsIgnoreCase(P.p.languageReader.get("Etc_Barrel"))) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	@EventHandler(priority = EventPriority.LOW, ignoreCancelled = true)
 	public void onSignChangeLow(SignChangeEvent event) {
-		if (Words.doSigns) {
+		if (DistortChat.doSigns) {
 			if (BPlayer.hasPlayer(event.getPlayer())) {
-				Words.signWrite(event);
+				DistortChat.signWrite(event);
+			}
+		}
+		if (BConfig.useBlocklocker) {
+			String[] lines = event.getLines();
+			if (hasBarrelLine(lines)) {
+				BlocklockerBarrel.createdBarrelSign(event.getBlock());
 			}
 		}
 	}
 
 	@EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+	public void onBlockPlace(BlockPlaceEvent event) {
+		if (!P.use1_14 || event.getBlock().getType() != Material.SMOKER) return;
+		BSealer.blockPlace(event.getItemInHand(), event.getBlock());
+	}
+
+	@EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
 	public void onBlockBreak(BlockBreakEvent event) {
-		if (!P.p.blockDestroy(event.getBlock(), event.getPlayer())) {
+		if (!BUtil.blockDestroy(event.getBlock(), event.getPlayer(), BarrelDestroyEvent.Reason.PLAYER)) {
 			event.setCancelled(true);
 		}
 	}
 
 	@EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
 	public void onBlockBurn(BlockBurnEvent event) {
-		P.p.blockDestroy(event.getBlock(), null);
+		if (!BUtil.blockDestroy(event.getBlock(), null, BarrelDestroyEvent.Reason.BURNED)) {
+			event.setCancelled(true);
+		}
 	}
 
 	@EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
 	public void onPistonRetract(BlockPistonRetractEvent event) {
 		if (event.isSticky()) {
-			Block block = event.getRetractLocation().getBlock();
-
-			if (Barrel.get(block) != null) {
-				event.setCancelled(true);
+			for (Block block : event.getBlocks()) {
+				if (Barrel.get(block) != null) {
+					event.setCancelled(true);
+					return;
+				}
 			}
 		}
 	}

@@ -1,12 +1,12 @@
 name: Brewery
-version: 1.8.2
+version: 3.0
 main: com.dre.brewery.P
-softdepend: [LWC, LogBlock, WorldGuard, GriefPrevention, Vault, Citadel]
+softdepend: [LWC, LogBlock, WorldGuard, GriefPrevention, Vault, ChestShop, Shopkeepers, Towny, BlockLocker]
 authors: [Milan Albrecht, Frank Baumann, ProgrammerDan, Daniel Saukel]
 api-version: 1.13
 commands:
   brewery:
-    description: Command for Administration
+    description: Mostly admin commands to create/modify Brews and drunkeness
     aliases: [brew]
 permissions:
 # -- Groups --
@@ -37,11 +37,15 @@ permissions:
       brewery.mod: true
       brewery.cmd.info: true
       brewery.cmd.infoOther: true
+      brewery.cmd.seal: true
+      brewery.cmd.puke: true
+      brewery.cmd.pukeOther: true
       brewery.cmd.player: true
       brewery.cmd.create: true
+      brewery.cmd.drink: true
+      brewery.cmd.drinkOther: true
       brewery.cmd.copy: true
       brewery.cmd.delete: true
-      brewery.cmd.persist: true
       brewery.cmd.static: true
       brewery.cmd.reload: true
 # *
@@ -61,18 +65,28 @@ permissions:
     description: Information about your own drunkeness
   brewery.cmd.infoOther:
     description: Information about the drunkeness of another Player
+  brewery.cmd.seal:
+    description: Open the Brew Sealer by command
+  brewery.cmd.puke:
+    description: Make yourself puke
+  brewery.cmd.pukeOther:
+    description: Make other Players puke
   brewery.cmd.player:
     description: Set Player-values
   brewery.cmd.wakeup:
     description: Set, Check and Remove Wakeup Points
+  brewery.cmd.create:
+    description: Create Brews
+  brewery.cmd.drink:
+    description: Simulate drinking Brews
+  brewery.cmd.drinkOther:
+    description: Simulate other players drinking Brews
   brewery.cmd.copy:
-    description: Copy Potions
+    description: Copy Brews
   brewery.cmd.delete:
-    description: Delete Potions
-  brewery.cmd.persist:
-    description: Make Potions Persistent
+    description: Delete Brews
   brewery.cmd.static:
-    description: Make Potions Static
+    description: Make Brews Static
   brewery.cmd.reload:
     description: Reload config
 
@@ -92,10 +106,13 @@ permissions:
     children:
       brewery.openbarrel.small: true
       brewery.openbarrel.big: true
+      brewery.openbarrel.mc: true
   brewery.openbarrel.small:
     description: Allow to open small Barrels
   brewery.openbarrel.big:
     description: Allow to open big Barrels
+  brewery.openbarrel.mc:
+    description: Allow to open Minecraft Barrels
 
 # -- Cauldron --
   brewery.cauldron.time:

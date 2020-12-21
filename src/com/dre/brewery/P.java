@@ -1,46 +1,44 @@
 package com.dre.brewery;
 
-import com.dre.brewery.filedata.ConfigUpdater;
+import com.dre.brewery.filedata.BConfig;
+import com.dre.brewery.filedata.BData;
 import com.dre.brewery.filedata.DataSave;
-import com.dre.brewery.filedata.DataUpdater;
 import com.dre.brewery.filedata.LanguageReader;
 import com.dre.brewery.filedata.UpdateChecker;
+import com.dre.brewery.integration.ChestShopListener;
+import com.dre.brewery.integration.IntegrationListener;
+import com.dre.brewery.integration.ShopKeepersListener;
+import com.dre.brewery.integration.barrel.BlocklockerBarrel;
+import com.dre.brewery.integration.barrel.LogBlockBarrel;
 
 import com.dre.brewery.integration.WGBarrel;
 import com.dre.brewery.integration.WGBarrelNew;
 import com.dre.brewery.integration.WGBarrelOld;
 import com.dre.brewery.listeners.*;
+import com.dre.brewery.recipe.*;
+import com.dre.brewery.utility.BUtil;
+import com.dre.brewery.utility.LegacyUtil;
 import org.apache.commons.lang.math.NumberUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.World;
-import org.bukkit.block.Block;
 import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
-import org.bukkit.entity.Player;
 import org.bukkit.event.HandlerList;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
+import java.sql.SQLException;
 import java.util.HashMap;
-import java.util.List;
+import java.util.Iterator;
 import java.util.Map;
-import java.util.UUID;
+import java.util.function.Function;
 
 public class P extends JavaPlugin {
 	public static P p;
-	public static final String configVersion = "1.8";
 	public static boolean debug;
 	public static boolean useUUID;
+	public static boolean useNBT;
 	public static boolean use1_9;
 	public static boolean use1_11;
 	public static boolean use1_13;
@@ -59,12 +57,19 @@ public class P extends JavaPlugin {
 	public EntityListener entityListener;
 	public InventoryListener inventoryListener;
 	public WorldListener worldListener;
+	public IntegrationListener integrationListener;
+
+	// Registrations
+	public Map<String, Function<ItemLoader, Ingredient>> ingredientLoaders = new HashMap<>();
 
 	// Language
 	public String language;
 	public LanguageReader languageReader;
 
-	private CommandSender reloader;
+	// Metrics
+	public int brewsCreated;
+	public int brewsCreatedCmd; // Created by command
+	public int exc, good, norm, bad, terr; // Brews drunken with quality
 
 	@Override
 	public void onEnable() {
@@ -78,22 +83,44 @@ public class P extends JavaPlugin {
 		use1_13 = !v.matches("(^|.*[^.\\d])1\\.1[0-2]([^\\d].*|$)") && !v.matches("(^|.*[^.\\d])1\\.[0-9]([^\\d].*|$)");
 		use1_14 = !v.matches("(^|.*[^.\\d])1\\.1[0-3]([^\\d].*|$)") && !v.matches("(^|.*[^.\\d])1\\.[0-9]([^\\d].*|$)");
 
-		//P.p.log("§" + (use1_9 ? "a":"c") + "1.9 " + "§" + (use1_11 ? "a":"c") + "1.11 " + "§" + (use1_13 ? "a":"c") + "1.13 " + "§" + (use1_14 ? "a":"c") + "1.14");
+		//MC 1.13 uses a different NBT API than the newer versions..
+		// We decide here which to use, the new or the old or none at all
+		if (LegacyUtil.initNbt()) {
+			useNBT = true;
+		}
+
+		if (use1_14) {
+			// Campfires are weird
+			// Initialize once now so it doesn't lag later when we check for campfires under Cauldrons
+			getServer().createBlockData(Material.CAMPFIRE);
+		}
 
 		// load the Config
 		try {
-			if (!readConfig()) {
+			FileConfiguration cfg = BConfig.loadConfigFile();
+			if (cfg == null) {
 				p = null;
 				getServer().getPluginManager().disablePlugin(this);
 				return;
 			}
+			BConfig.readConfig(cfg);
 		} catch (Exception e) {
 			e.printStackTrace();
 			p = null;
 			getServer().getPluginManager().disablePlugin(this);
 			return;
 		}
-		readData();
+
+		// Register Item Loaders
+		CustomItem.registerItemLoader(this);
+		SimpleItem.registerItemLoader(this);
+		PluginItem.registerItemLoader(this);
+
+		// Read data files
+		BData.readData();
+
+		// Setup Metrics
+		setupMetrics();
 
 		// Listeners
 		blockListener = new BlockListener();
@@ -101,23 +128,38 @@ public class P extends JavaPlugin {
 		entityListener = new EntityListener();
 		inventoryListener = new InventoryListener();
 		worldListener = new WorldListener();
-		getCommand("Brewery").setExecutor(new CommandListener());
-		getCommand("Brewery").setTabCompleter(new TabListener());
+		integrationListener = new IntegrationListener();
+		PluginCommand c = getCommand("Brewery");
+		if (c != null) {
+			c.setExecutor(new CommandListener());
+			c.setTabCompleter(new TabListener());
+		}
 
 		p.getServer().getPluginManager().registerEvents(blockListener, p);
 		p.getServer().getPluginManager().registerEvents(playerListener, p);
 		p.getServer().getPluginManager().registerEvents(entityListener, p);
 		p.getServer().getPluginManager().registerEvents(inventoryListener, p);
 		p.getServer().getPluginManager().registerEvents(worldListener, p);
+		p.getServer().getPluginManager().registerEvents(integrationListener, p);
 		if (use1_9) {
 			p.getServer().getPluginManager().registerEvents(new CauldronListener(), p);
+		}
+		if (BConfig.hasChestShop && use1_13) {
+			p.getServer().getPluginManager().registerEvents(new ChestShopListener(), p);
+		}
+		if (BConfig.hasShopKeepers) {
+			p.getServer().getPluginManager().registerEvents(new ShopKeepersListener(), p);
 		}
 
 		// Heartbeat
 		p.getServer().getScheduler().runTaskTimer(p, new BreweryRunnable(), 650, 1200);
 		p.getServer().getScheduler().runTaskTimer(p, new DrunkRunnable(), 120, 120);
 
-		if (updateCheck) {
+		if (use1_9) {
+			p.getServer().getScheduler().runTaskTimer(p, new CauldronParticles(), 1, 1);
+		}
+
+		if (BConfig.updateCheck) {
 			try {
 				p.getServer().getScheduler().runTaskLaterAsynchronously(p, new UpdateChecker(), 135);
 			} catch (Exception e) {
@@ -144,30 +186,32 @@ public class P extends JavaPlugin {
 		// save Data to Disk
 		DataSave.save(true);
 
-		// save LanguageReader
-		languageReader.save();
+		if (BConfig.sqlSync != null) {
+			try {
+				BConfig.sqlSync.closeConnection();
+			} catch (SQLException ignored) {
+			}
+			BConfig.sqlSync = null;
+		}
 
-		// delete Data from Ram
-		Barrel.barrels.clear();
-		BCauldron.bcauldrons.clear();
-		BIngredients.possibleIngredients.clear();
-		BIngredients.recipes.clear();
-		BIngredients.cookedNames.clear();
-		BPlayer.clear();
-		Brew.potions.clear();
-		Wakeup.wakeups.clear();
-		Words.words.clear();
-		Words.ignoreText.clear();
-		Words.commands = null;
+		// delete config data, in case this is a reload and to clear up some ram
+		clearConfigData();
 
 		this.log(this.getDescription().getName() + " disabled!");
 	}
 
 	public void reload(CommandSender sender) {
 		if (sender != null && !sender.equals(getServer().getConsoleSender())) {
-			reloader = sender;
+			BConfig.reloader = sender;
 		}
+		FileConfiguration cfg = BConfig.loadConfigFile();
+		if (cfg == null) {
+			// Could not read yml file, do not proceed, error was printed
+			return;
+		}
+
 		// clear all existent config Data
+		clearConfigData();
 		BIngredients.possibleIngredients.clear();
 		BIngredients.recipes.clear();
 		BIngredients.cookedNames.clear();
@@ -178,11 +222,7 @@ public class P extends JavaPlugin {
 
 		// load the Config
 		try {
-			if (!readConfig()) {
-				p = null;
-				getServer().getPluginManager().disablePlugin(this);
-				return;
-			}
+			BConfig.readConfig(cfg);
 		} catch (Exception e) {
 			e.printStackTrace();
 			p = null;
@@ -190,17 +230,28 @@ public class P extends JavaPlugin {
 			return;
 		}
 
-		// save and load LanguageReader
-		languageReader.save();
-		languageReader = new LanguageReader(new File(p.getDataFolder(), "languages/" + language + ".yml"));
+		// Reload Cauldron Particle Recipes
+		BCauldron.reload();
+
+		// Clear Recipe completions
+		TabListener.reload();
 
 		// Reload Recipes
 		boolean successful = true;
-		for (Brew brew : Brew.potions.values()) {
+		for (Brew brew : Brew.legacyPotions.values()) {
 			if (!brew.reloadRecipe()) {
 				successful = false;
 			}
 		}
+		if (sender != null) {
+			if (!successful) {
+				msg(sender, p.languageReader.get("Error_Recipeload"));
+			} else {
+				p.msg(sender, p.languageReader.get("CMD_Reload"));
+			}
+		}
+		BConfig.reloader = null;
+	}
 		if (!successful && sender != null) {
 			msg(sender, p.languageReader.get("Error_Recipeload"));
 		}
@@ -277,7 +328,7 @@ public class P extends JavaPlugin {
 			}
 		}
 		hasVault = getServer().getPluginManager().isPluginEnabled("Vault");
-		
+
 		useCitadel = config.getBoolean("useCitadel", false) && getServer().getPluginManager().isPluginEnabled("Citadel");
 		// The item util has been removed in Vault 1.7+
 		hasVault = getServer().getPluginManager().isPluginEnabled("Vault")
@@ -312,350 +363,241 @@ public class P extends JavaPlugin {
 			}
 		}
 
-		// loading cooked names and possible ingredients
-		configSection = config.getConfigurationSection("cooked");
-		if (configSection != null) {
-			for (String ingredient : configSection.getKeys(false)) {
-				Material mat = Material.matchMaterial(ingredient);
-				if (mat == null && hasVault) {
-					try {
-						net.milkbowl.vault.item.ItemInfo vaultItem = net.milkbowl.vault.item.Items.itemByString(ingredient);
-						if (vaultItem != null) {
-							mat = vaultItem.getType();
-						}
-					} catch (Exception e) {
-						P.p.errorLog("Could not check vault for Item Name");
-						e.printStackTrace();
-					}
-				}
-				if (mat != null) {
-					BIngredients.cookedNames.put(mat, (configSection.getString(ingredient, null)));
-					BIngredients.possibleIngredients.add(mat);
-				} else {
-					errorLog("Unknown Material: " + ingredient);
-				}
-			}
-		}
-
-		// loading drainItems
-		List<String> drainList = config.getStringList("drainItems");
-		if (drainList != null) {
-			for (String drainString : drainList) {
-				String[] drainSplit = drainString.split("/");
-				if (drainSplit.length > 1) {
-					Material mat = Material.matchMaterial(drainSplit[0]);
-					int strength = p.parseInt(drainSplit[1]);
-					if (mat == null && hasVault && strength > 0) {
-						try {
-							net.milkbowl.vault.item.ItemInfo vaultItem = net.milkbowl.vault.item.Items.itemByString(drainSplit[0]);
-							if (vaultItem != null) {
-								mat = vaultItem.getType();
-							}
-						} catch (Exception e) {
-							P.p.errorLog("Could not check vault for Item Name");
-							e.printStackTrace();
-						}
-					}
-					if (mat != null && strength > 0) {
-						BPlayer.drainItems.put(mat, strength);
-					}
-				}
-			}
-		}
-
-		// Loading Words
-		if (config.getBoolean("enableChatDistortion", false)) {
-			for (Map<?, ?> map : config.getMapList("words")) {
-				new Words(map);
-			}
-			for (String bypass : config.getStringList("distortBypass")) {
-				Words.ignoreText.add(bypass.split(","));
-			}
-			Words.commands = config.getStringList("distortCommands");
-		}
-		Words.log = config.getBoolean("logRealChat", false);
-		Words.doSigns = config.getBoolean("distortSignText", false);
-
-		return true;
-	}
-
-	// load all Data
-	public void readData() {
-		File file = new File(p.getDataFolder(), "data.yml");
-		if (file.exists()) {
-
-			FileConfiguration data = YamlConfiguration.loadConfiguration(file);
-
-			Brew.installTime = data.getLong("installTime", System.currentTimeMillis());
-			MCBarrel.mcBarrelTime = data.getLong("MCBarrelTime", 0);
-
-			// Check if data is the newest version
-			String version = data.getString("Version", null);
-			if (version != null) {
-				if (!version.equals(DataSave.dataVersion)) {
-					P.p.log("Data File is being updated...");
-					new DataUpdater(data, file).update(version);
-					data = YamlConfiguration.loadConfiguration(file);
-					P.p.log("Data Updated to version: " + DataSave.dataVersion);
-				}
-			}
-
-			// loading Ingredients into ingMap
-			Map<String, BIngredients> ingMap = new HashMap<>();
-			ConfigurationSection section = data.getConfigurationSection("Ingredients");
-			if (section != null) {
-				for (String id : section.getKeys(false)) {
-					ConfigurationSection matSection = section.getConfigurationSection(id + ".mats");
-					if (matSection != null) {
-						// matSection has all the materials + amount as Integers
-						ArrayList<ItemStack> ingredients = deserializeIngredients(matSection);
-						ingMap.put(id, new BIngredients(ingredients, section.getInt(id + ".cookedTime", 0)));
-					} else {
-						errorLog("Ingredient id: '" + id + "' incomplete in data.yml");
-					}
-				}
-			}
-
-			// loading Brew
-			section = data.getConfigurationSection("Brew");
-			if (section != null) {
-				// All sections have the UID as name
-				for (String uid : section.getKeys(false)) {
-					BIngredients ingredients = getIngredients(ingMap, section.getString(uid + ".ingId"));
-					int quality = section.getInt(uid + ".quality", 0);
-					int distillRuns = section.getInt(uid + ".distillRuns", 0);
-					float ageTime = (float) section.getDouble(uid + ".ageTime", 0.0);
-					float wood = (float) section.getDouble(uid + ".wood", -1.0);
-					String recipe = section.getString(uid + ".recipe", null);
-					boolean unlabeled = section.getBoolean(uid + ".unlabeled", false);
-					boolean persistent = section.getBoolean(uid + ".persist", false);
-					boolean stat = section.getBoolean(uid + ".stat", false);
-					int lastUpdate = section.getInt("lastUpdate", 0);
-
-					new Brew(parseInt(uid), ingredients, quality, distillRuns, ageTime, wood, recipe, unlabeled, persistent, stat, lastUpdate);
-				}
-			}
-
-			// loading BPlayer
-			section = data.getConfigurationSection("Player");
-			if (section != null) {
-				// keys have players name
-				for (String name : section.getKeys(false)) {
-					try {
-						//noinspection ResultOfMethodCallIgnored
-						UUID.fromString(name);
-						if (!useUUID) {
-							continue;
-						}
-					} catch (IllegalArgumentException e) {
-						if (useUUID) {
-							continue;
-						}
-					}
-
-					int quality = section.getInt(name + ".quality");
-					int drunk = section.getInt(name + ".drunk");
-					int offDrunk = section.getInt(name + ".offDrunk", 0);
-
-					new BPlayer(name, quality, drunk, offDrunk);
-				}
-			}
-
-			for (World world : p.getServer().getWorlds()) {
-				if (world.getName().startsWith("DXL_")) {
-					loadWorldData(Util.getDxlName(world.getName()), world);
-				} else {
-					loadWorldData(world.getUID().toString(), world);
-				}
-			}
-
-		} else {
-			errorLog("No data.yml found, will create new one!");
-		}
-	}
-
-	public ArrayList<ItemStack> deserializeIngredients(ConfigurationSection matSection) {
-		ArrayList<ItemStack> ingredients = new ArrayList<>();
-		for (String mat : matSection.getKeys(false)) {
-			String[] matSplit = mat.split(",");
-			Material m = Material.getMaterial(matSplit[0]);
-			if (m == null && use1_13) {
-				if (matSplit[0].equals("LONG_GRASS")) {
-					m = Material.GRASS;
-				} else {
-					m = Material.matchMaterial(matSplit[0], true);
-				}
-				debugLog("converting Data Material from " + matSplit[0] + " to " + m);
-			}
-			if (m == null) continue;
-			ItemStack item = new ItemStack(m, matSection.getInt(mat));
-			if (matSplit.length == 2) {
-				item.setDurability((short) P.p.parseInt(matSplit[1]));
-			}
-			ingredients.add(item);
-		}
-		return ingredients;
-	}
-
-	// returns Ingredients by id from the specified ingMap
-	public BIngredients getIngredients(Map<String, BIngredients> ingMap, String id) {
-		if (!ingMap.isEmpty()) {
-			if (ingMap.containsKey(id)) {
-				return ingMap.get(id);
-			}
-		}
-		errorLog("Ingredient id: '" + id + "' not found in data.yml");
-		return new BIngredients();
-	}
-
-	// loads BIngredients from an ingredient section
-	public BIngredients loadIngredients(ConfigurationSection section) {
-		if (section != null) {
-			return new BIngredients(deserializeIngredients(section), 0);
-		} else {
-			errorLog("Cauldron is missing Ingredient Section");
-		}
-		return new BIngredients();
-	}
-
-	// load Block locations of given world
-	public void loadWorldData(String uuid, World world) {
-
-		File file = new File(p.getDataFolder(), "data.yml");
-		if (file.exists()) {
-
-			FileConfiguration data = YamlConfiguration.loadConfiguration(file);
-
-			// loading BCauldron
-			if (data.contains("BCauldron." + uuid)) {
-				ConfigurationSection section = data.getConfigurationSection("BCauldron." + uuid);
-				for (String cauldron : section.getKeys(false)) {
-					// block is splitted into x/y/z
-					String block = section.getString(cauldron + ".block");
-					if (block != null) {
-						String[] splitted = block.split("/");
-						if (splitted.length == 3) {
-
-							Block worldBlock = world.getBlockAt(parseInt(splitted[0]), parseInt(splitted[1]), parseInt(splitted[2]));
-							BIngredients ingredients = loadIngredients(section.getConfigurationSection(cauldron + ".ingredients"));
-							int state = section.getInt(cauldron + ".state", 1);
-
-							new BCauldron(worldBlock, ingredients, state);
-						} else {
-							errorLog("Incomplete Block-Data in data.yml: " + section.getCurrentPath() + "." + cauldron);
-						}
-					} else {
-						errorLog("Missing Block-Data in data.yml: " + section.getCurrentPath() + "." + cauldron);
-					}
-				}
-			}
-
-			// loading Barrel
-			if (data.contains("Barrel." + uuid)) {
-				ConfigurationSection section = data.getConfigurationSection("Barrel." + uuid);
-				for (String barrel : section.getKeys(false)) {
-					// block spigot is splitted into x/y/z
-					String spigot = section.getString(barrel + ".spigot");
-					if (spigot != null) {
-						String[] splitted = spigot.split("/");
-						if (splitted.length == 3) {
-
-							// load itemStacks from invSection
-							ConfigurationSection invSection = section.getConfigurationSection(barrel + ".inv");
-							Block block = world.getBlockAt(parseInt(splitted[0]), parseInt(splitted[1]), parseInt(splitted[2]));
-							float time = (float) section.getDouble(barrel + ".time", 0.0);
-							byte sign = (byte) section.getInt(barrel + ".sign", 0);
-							String[] st = section.getString(barrel + ".st", "").split(",");
-							String[] wo = section.getString(barrel + ".wo", "").split(",");
-
-							if (invSection != null) {
-								new Barrel(block, sign, st, wo, invSection.getValues(true), time);
-							} else {
-								// Barrel has no inventory
-								new Barrel(block, sign, st, wo, null, time);
-							}
-
-						} else {
-							errorLog("Incomplete Block-Data in data.yml: " + section.getCurrentPath() + "." + barrel);
-						}
-					} else {
-						errorLog("Missing Block-Data in data.yml: " + section.getCurrentPath() + "." + barrel);
-					}
-				}
-			}
-
-			// loading Wakeup
-			if (data.contains("Wakeup." + uuid)) {
-				ConfigurationSection section = data.getConfigurationSection("Wakeup." + uuid);
-				for (String wakeup : section.getKeys(false)) {
-					// loc of wakeup is splitted into x/y/z/pitch/yaw
-					String loc = section.getString(wakeup);
-					if (loc != null) {
-						String[] splitted = loc.split("/");
-						if (splitted.length == 5) {
-
-							double x = NumberUtils.toDouble(splitted[0]);
-							double y = NumberUtils.toDouble(splitted[1]);
-							double z = NumberUtils.toDouble(splitted[2]);
-							float pitch = NumberUtils.toFloat(splitted[3]);
-							float yaw = NumberUtils.toFloat(splitted[4]);
-							Location location = new Location(world, x, y, z, yaw, pitch);
-
-							Wakeup.wakeups.add(new Wakeup(location));
-
-						} else {
-							errorLog("Incomplete Location-Data in data.yml: " + section.getCurrentPath() + "." + wakeup);
-						}
-					}
-				}
-			}
-
-		}
-	}
-
-	private boolean checkConfigs() {
-		File cfg = new File(p.getDataFolder(), "config.yml");
-		if (!cfg.exists()) {
-			errorLog("No config.yml found, creating default file! You may want to choose a config according to your language!");
-			errorLog("You can find them in plugins/Brewery/configs/");
-			InputStream defconf = getResource("config/" + (use1_13 ? "v13/" : "v12/") + "en/config.yml");
-			if (defconf == null) {
-				errorLog("default config file not found, your jarfile may be corrupt. Disabling Brewery!");
-				return false;
-			}
+	private void clearConfigData() {
+		BRecipe.getConfigRecipes().clear();
+		BRecipe.numConfigRecipes = 0;
+		BCauldronRecipe.acceptedMaterials.clear();
+		BCauldronRecipe.acceptedCustom.clear();
+		BCauldronRecipe.acceptedSimple.clear();
+		BCauldronRecipe.getConfigRecipes().clear();
+		BCauldronRecipe.numConfigRecipes = 0;
+		BConfig.customItems.clear();
+		BConfig.hasSlimefun = null;
+		BConfig.hasMMOItems = null;
+		DistortChat.commands = null;
+		BConfig.drainItems.clear();
+		if (BConfig.useLB) {
 			try {
-				Util.saveFile(defconf, getDataFolder(), "config.yml", false);
-			} catch (IOException e) {
+				LogBlockBarrel.clear();
+			} catch (Exception e) {
 				e.printStackTrace();
-				return false;
 			}
 		}
-		if (!cfg.exists()) {
-			errorLog("default config file could not be copied, your jarfile may be corrupt. Disabling Brewery!");
-			return false;
-		}
-
-		copyDefaultConfigs(false);
-		return true;
 	}
 
-	private void copyDefaultConfigs(boolean overwrite) {
-		File configs = new File(getDataFolder(), "configs");
-		File languages = new File(getDataFolder(), "languages");
-		for (String l : new String[] {"de", "en", "fr", "it", "zh", "tw"}) {
-			File lfold = new File(configs, l);
-			try {
-				Util.saveFile(getResource("config/" + (use1_13 ? "v13/" : "v12/") + l + "/config.yml"), lfold, "config.yml", overwrite);
-				Util.saveFile(getResource("languages/" + l + ".yml"), languages, l + ".yml", false); // Never overwrite languages for now
-			} catch (IOException e) {
-				if (!(l.equals("zh") || l.equals("tw"))) {
-					e.printStackTrace();
+	/**
+	 * For loading ingredients from ItemMeta.
+	 * <p>Register a Static function that takes an ItemLoader, containing a DataInputStream.
+	 * <p>Using the Stream it constructs a corresponding Ingredient for the chosen SaveID
+	 *
+	 * @param saveID The SaveID should be a small identifier like "AB"
+	 * @param loadFct The Static Function that loads the Item, i.e.
+	 *                public static AItem loadFrom(ItemLoader loader)
+	 */
+	public void registerForItemLoader(String saveID, Function<ItemLoader, Ingredient> loadFct) {
+		ingredientLoaders.put(saveID, loadFct);
+	}
+
+	/**
+	 * Unregister the ItemLoader
+	 *
+	 * @param saveID the chosen SaveID
+	 */
+	public void unRegisterItemLoader(String saveID) {
+		ingredientLoaders.remove(saveID);
+	}
+
+	public static P getInstance() {
+		return p;
+	}
+
+	private void setupMetrics() {
+		try {
+			Metrics metrics = new Metrics(this);
+			metrics.addCustomChart(new Metrics.SingleLineChart("drunk_players", BPlayer::numDrunkPlayers));
+			metrics.addCustomChart(new Metrics.SingleLineChart("brews_in_existence", () -> brewsCreated));
+			metrics.addCustomChart(new Metrics.SingleLineChart("barrels_built", () -> Barrel.barrels.size()));
+			metrics.addCustomChart(new Metrics.SingleLineChart("cauldrons_boiling", () -> BCauldron.bcauldrons.size()));
+			metrics.addCustomChart(new Metrics.AdvancedPie("brew_quality", () -> {
+				Map<String, Integer> map = new HashMap<>(8);
+				map.put("excellent", exc);
+				map.put("good", good);
+				map.put("normal", norm);
+				map.put("bad", bad);
+				map.put("terrible", terr);
+				return map;
+			}));
+			metrics.addCustomChart(new Metrics.AdvancedPie("brews_created", () -> {
+				Map<String, Integer> map = new HashMap<>(4);
+				map.put("by command", brewsCreatedCmd);
+				map.put("brewing", brewsCreated - brewsCreatedCmd);
+				return map;
+			}));
+
+			metrics.addCustomChart(new Metrics.SimplePie("number_of_recipes", () -> {
+				int recipes = BRecipe.getAllRecipes().size();
+				if (recipes < 7) {
+					return "Less than 7";
+				} else if (recipes < 11) {
+					return "7-10";
+				} else if (recipes == 11) {
+					// There were 11 default recipes, so show this as its own slice
+					return "11";
+				} else if (recipes == 20) {
+					// There are 20 default recipes, so show this as its own slice
+					return "20";
+				} else if (recipes <= 29) {
+					if (recipes % 2 == 0) {
+						return recipes + "-" + (recipes + 1);
+					} else {
+						return (recipes - 1) + "-" + recipes;
+					}
+				} else if (recipes < 35) {
+					return "30-34";
+				} else if (recipes < 40) {
+					return "35-39";
+				} else if (recipes < 45) {
+					return "40-44";
+				} else if (recipes <= 50) {
+					return "45-50";
+				} else {
+					return "More than 50";
 				}
-			}
+
+			}));
+
+			metrics.addCustomChart(new Metrics.SimplePie("wakeups", () -> {
+				if (!BConfig.enableHome) {
+					return "disabled";
+				}
+				int wakeups = Wakeup.wakeups.size();
+				if (wakeups == 0) {
+					return "0";
+				} else if (wakeups <= 5) {
+					return "1-5";
+				} else if (wakeups <= 10) {
+					return "6-10";
+				} else if (wakeups <= 20) {
+					return "11-20";
+				} else {
+					return "More than 20";
+				}
+			}));
+			metrics.addCustomChart(new Metrics.SimplePie("v2_mc_version", () -> {
+				String mcv = Bukkit.getBukkitVersion();
+				mcv = mcv.substring(0, mcv.indexOf('.', 2));
+				int index = mcv.indexOf('-');
+				if (index > -1) {
+					mcv = mcv.substring(0, index);
+				}
+				if (mcv.matches("^\\d\\.\\d{1,2}$")) {
+					// Start, digit, dot, 1-2 digits, end
+					return mcv;
+				} else {
+					return "undef";
+				}
+			}));
+			metrics.addCustomChart(new Metrics.DrilldownPie("plugin_mc_version", () -> {
+				Map<String, Map<String, Integer>> map = new HashMap<>(3);
+				String mcv = Bukkit.getBukkitVersion();
+				mcv = mcv.substring(0, mcv.indexOf('.', 2));
+				int index = mcv.indexOf('-');
+				if (index > -1) {
+					mcv = mcv.substring(0, index);
+				}
+				if (mcv.matches("^\\d\\.\\d{1,2}$")) {
+					// Start, digit, dot, 1-2 digits, end
+					mcv = "MC " + mcv;
+				} else {
+					mcv = "undef";
+				}
+				Map<String, Integer> innerMap = new HashMap<>(3);
+				innerMap.put(mcv, 1);
+				map.put(getDescription().getVersion(), innerMap);
+				return map;
+			}));
+			metrics.addCustomChart(new Metrics.SimplePie("language", () -> language));
+			metrics.addCustomChart(new Metrics.SimplePie("config_scramble", () -> BConfig.enableEncode ? "enabled" : "disabled"));
+			metrics.addCustomChart(new Metrics.SimplePie("config_lore_color", () -> {
+				if (BConfig.colorInBarrels) {
+					if (BConfig.colorInBrewer) {
+						return "both";
+					} else {
+						return "in barrels";
+					}
+				} else {
+					if (BConfig.colorInBrewer) {
+						return "in distiller";
+					} else {
+						return "none";
+					}
+				}
+			}));
+			metrics.addCustomChart(new Metrics.SimplePie("config_always_show", () -> {
+				if (BConfig.alwaysShowQuality) {
+					if (BConfig.alwaysShowAlc) {
+						return "both";
+					} else {
+						return "quality stars";
+					}
+				} else {
+					if (BConfig.alwaysShowAlc) {
+						return "alc content";
+					} else {
+						return "none";
+					}
+				}
+			}));
+		} catch (Throwable e) {
+			e.printStackTrace();
+		}
+	}
+
+	public void metricsForCreate(boolean byCmd) {
+		if (brewsCreated == Integer.MAX_VALUE) return;
+		brewsCreated++;
+		if (byCmd) {
+			if (brewsCreatedCmd == Integer.MAX_VALUE) return;
+			brewsCreatedCmd++;
+		}
+	}
+
+	public void metricsForDrink(Brew brew) {
+		if (brew.getQuality() >= 9) {
+			exc++;
+		} else if (brew.getQuality() >= 7) {
+			good++;
+		} else if (brew.getQuality() >= 5) {
+			norm++;
+		} else if (brew.getQuality() >= 3) {
+			bad++;
+		} else {
+			terr++;
 		}
 	}
 
 	// Utility
+
+	public void msg(CommandSender sender, String msg) {
+		sender.sendMessage(color("&2[Brewery] &f" + msg));
+	}
+
+	public void log(String msg) {
+		this.msg(Bukkit.getConsoleSender(), msg);
+	}
+
+	public void debugLog(String msg) {
+		if (debug) {
+			this.msg(Bukkit.getConsoleSender(), "&2[Debug] &f" + msg);
+		}
+	}
+
+	public void errorLog(String msg) {
+		Bukkit.getConsoleSender().sendMessage(ChatColor.DARK_GREEN + "[Brewery] " + ChatColor.DARK_RED + "ERROR: " + ChatColor.RED + msg);
+		if (BConfig.reloader != null) {
+			BConfig.reloader.sendMessage(ChatColor.DARK_GREEN + "[Brewery] " + ChatColor.DARK_RED + "ERROR: " + ChatColor.RED + msg);
+		}
+	}
 
 	public int parseInt(String string) {
 		return NumberUtils.toInt(string, 0);
@@ -698,13 +640,13 @@ public class P extends JavaPlugin {
 	}
 
 	public String color(String msg) {
-		return Util.color(msg);
+		return BUtil.color(msg);
 	}
 
 
 	// Runnables
 
-	public class DrunkRunnable implements Runnable {
+	public static class DrunkRunnable implements Runnable {
 		@Override
 		public void run() {
 			if (!BPlayer.isEmpty()) {
@@ -716,19 +658,46 @@ public class P extends JavaPlugin {
 	public class BreweryRunnable implements Runnable {
 		@Override
 		public void run() {
-			reloader = null;
-			for (BCauldron cauldron : BCauldron.bcauldrons) {
-				cauldron.onUpdate();// runs every min to update cooking time
+			long t1 = System.nanoTime();
+			BConfig.reloader = null;
+			Iterator<BCauldron> iter = BCauldron.bcauldrons.values().iterator();
+			while (iter.hasNext()) {
+				// runs every min to update cooking time
+				if (!iter.next().onUpdate()) {
+					iter.remove();
+				}
 			}
+			long t2 = System.nanoTime();
 			Barrel.onUpdate();// runs every min to check and update ageing time
+			long t3 = System.nanoTime();
 			if (use1_14) MCBarrel.onUpdate();
+			if (BConfig.useBlocklocker) BlocklockerBarrel.clearBarrelSign();
+			long t4 = System.nanoTime();
 			BPlayer.onUpdate();// updates players drunkeness
 
-			debugLog("Update");
-
+			long t5 = System.nanoTime();
 			DataSave.autoSave();
+			long t6 = System.nanoTime();
+
+			debugLog("BreweryRunnable: " +
+				"t1: " + (t2 - t1) / 1000000.0 + "ms" +
+				" | t2: " + (t3 - t2) / 1000000.0 + "ms" +
+				" | t3: " + (t4 - t3) / 1000000.0 + "ms" +
+				" | t4: " + (t5 - t4) / 1000000.0 + "ms" +
+				" | t5: " + (t6 - t5) / 1000000.0 + "ms" );
 		}
 
+	}
+
+	public class CauldronParticles implements Runnable {
+		@Override
+		public void run() {
+			if (!BConfig.enableCauldronParticles) return;
+			if (BConfig.minimalParticles && BCauldron.particleRandom.nextFloat() > 0.5f) {
+				return;
+			}
+			BCauldron.processCookEffects();
+		}
 	}
 
 }

@@ -1,16 +1,19 @@
 package com.dre.brewery;
 
+import com.dre.brewery.utility.BUtil;
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.entity.Player;
+
 import java.util.ArrayList;
 import java.util.Iterator;
-
-import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.command.CommandSender;
-import org.bukkit.Location;
-import org.bukkit.entity.Player;
+import java.util.List;
 
 public class Wakeup {
 
-	public static ArrayList<Wakeup> wakeups = new ArrayList<>();
+	public static List<Wakeup> wakeups = new ArrayList<>();
 	public static P p = P.p;
 	public static int checkId = -1;
 	public static Player checkPlayer = null;
@@ -140,7 +143,7 @@ public class Wakeup {
 				locs.add("&6" + s + id + "&f" + s + ": " + world + " " + x + "," + y + "," + z);
 			}
 		}
-		Util.list(sender, locs, page);
+		BUtil.list(sender, locs, page);
 	}
 
 	public static void check(CommandSender sender, int id, boolean all) {
@@ -228,7 +231,7 @@ public class Wakeup {
 
 
 	public static void save(ConfigurationSection section, ConfigurationSection oldData) {
-		Util.createWorldSections(section);
+		BUtil.createWorldSections(section);
 
 		// loc is saved as a String in world sections with format x/y/z/pitch/yaw
 		if (!wakeups.isEmpty()) {
@@ -245,7 +248,7 @@ public class Wakeup {
 				String prefix;
 
 				if (worldName.startsWith("DXL_")) {
-					prefix = Util.getDxlName(worldName) + "." + id;
+					prefix = BUtil.getDxlName(worldName) + "." + id;
 				} else {
 					prefix = wakeup.loc.getWorld().getUID().toString() + "." + id;
 				}
@@ -262,6 +265,15 @@ public class Wakeup {
 				}
 			}
 		}
+	}
+
+	public static void onUnload(World world) {
+		wakeups.removeIf(wakeup -> wakeup.loc.getWorld().equals(world));
+	}
+
+	public static void unloadWorlds() {
+		List<World> worlds = P.p.getServer().getWorlds();
+		wakeups.removeIf(wakeup -> !worlds.contains(wakeup.loc.getWorld()));
 	}
 
 }

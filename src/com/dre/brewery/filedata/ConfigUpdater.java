@@ -1,17 +1,18 @@
 package com.dre.brewery.filedata;
 
-import com.dre.brewery.LegacyUtil;
 import com.dre.brewery.P;
+import com.dre.brewery.utility.LegacyUtil;
+import com.dre.brewery.utility.Tuple;
 import org.bukkit.Material;
+import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
 
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 public class ConfigUpdater {
 
@@ -49,6 +50,29 @@ public class ConfigUpdater {
 		config.addAll(index, Arrays.asList(newLines));
 	}
 
+	public void removeLine(int index) {
+		config.remove(index);
+	}
+
+	public void addLinesAt(String[] search, int offset, String... newLines) {
+		addLinesAt(search, offset, true, newLines);
+	}
+
+	public void addLinesAt(String[] search, int offset, boolean appendIfNotFound, String... newLines) {
+		int index = indexOfStart(search[0]);
+		int s = 1;
+		while (index == -1 && s < search.length) {
+			index = indexOfStart(search[s]);
+			s++;
+		}
+
+		if (index != -1) {
+			addLines(index + offset, newLines);
+		} else if (appendIfNotFound) {
+			appendLines(newLines);
+		}
+	}
+
 	public void saveConfig() {
 		StringBuilder stringBuilder = new StringBuilder();
 		for (String line : config) {
@@ -82,10 +106,35 @@ public class ConfigUpdater {
 
 
 
+	// ---- Updating Scramble Seed ----
+
+	public void setEncodeKey(long key) {
+		int index = indexOfStart("encodeKey:");
+		if (index != -1) {
+			setLine(index, "encodeKey: " + key);
+			return;
+		}
+
+		// Old key not present
+		index = indexOfStart("enableEncode:");
+		if (index == -1) {
+			index = indexOfStart("# So enable this if you want to make recipe cheating harder");
+		}
+		if (index == -1) {
+			index = indexOfStart("version:");
+		}
+		if (index != -1) {
+			addLines(index + 1, "encodeKey: " + key);
+		} else {
+			addLines(1, "encodeKey: " + key);
+		}
+
+	}
+
 	// ---- Updating to newer Versions ----
 
 	// Update from a specified Config version and language to the newest version
-	public void update(String fromVersion, boolean oldMat, String lang) {
+	public void update(String fromVersion, boolean oldMat, String lang, FileConfiguration yml) {
 		if (fromVersion.equals("0.5")) {
 			// Version 0.5 was only released for de, but with en as setting, so default to de
 			if (!lang.equals("de")) {
@@ -162,12 +211,55 @@ public class ConfigUpdater {
 			fromVersion = "1.8";
 		}
 
+		if (fromVersion.equals("1.8")) {
+			if (de) {
+				update18de(yml);
+			} else if (lang.equals("fr")) {
+				update18fr(yml);
+			} else {
+				update18en(yml);
+			}
+			fromVersion = "2.0";
+		}
+
+		if (fromVersion.equals("2.0")) {
+			if (de) {
+				update20de();
+			} else if (lang.equals("fr")) {
+				update20fr();
+			} else {
+				update20en();
+			}
+			fromVersion = "2.1";
+		}
+
+		if (fromVersion.equals("2.1")) {
+			if (de) {
+				update21de();
+			} else if (lang.equals("fr")) {
+				update21fr();
+			} else {
+				update21en();
+			}
+			fromVersion = "2.1.1";
+		}
+		if (fromVersion.equals("2.1.1")) {
+			update30CauldronParticles();
+			if (de) {
+				update30de();
+			} else {
+				update30en();
+			}
+			updateVersion(BConfig.configVersion);
+			fromVersion = "3.0";
+		}
+
 		if (P.use1_13 && oldMat) {
 			updateMaterials(true);
 			updateMaterialDescriptions(de);
 		}
 
-		if (!fromVersion.equals("1.8")) {
+		if (!fromVersion.equals(BConfig.configVersion)) {
 			P.p.log(P.p.languageReader.get("Error_ConfigUpdate", fromVersion));
 			return;
 		}
@@ -526,12 +618,12 @@ public class ConfigUpdater {
 		if (index != -1) {
 			index = indexOfStart("#   (WEAKNESS, INCREASE_DAMAGE, SLOW und SPEED sind immer verborgen.)  Mögliche Effekte:");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 		}
 		index = indexOfStart("#   Bei Effekten mit sofortiger Wirkung ");
 		if (index != -1) {
-			config.remove(index);
+			removeLine(index);
 		}
 
 	}
@@ -625,12 +717,12 @@ public class ConfigUpdater {
 		if (index != -1) {
 			index = indexOfStart("#   (WEAKNESS, INCREASE_DAMAGE, SLOW and SPEED are always hidden.)  Possible Effects:");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 		}
 		index = indexOfStart("#   instant effects ");
 		if (index != -1) {
-			config.remove(index);
+			removeLine(index);
 		}
 
 	}
@@ -693,7 +785,7 @@ public class ConfigUpdater {
 
 		int index = indexOfStart("# SamplePlugin = installiertes home plugin. Unterstützt: ManagerXL.");
 		if (index != -1) {
-			config.remove(index);
+			removeLine(index);
 		}
 
 		index = indexOfStart("# Ob der Spieler nach etwas kürzerem Ausloggen an einem zufälligen Ort \"aufwacht\" (diese müssen durch '/br Wakeup add");
@@ -815,7 +907,7 @@ public class ConfigUpdater {
 
 		int index = indexOfStart("# SamplePlugin = installed home plugin. Supports: ManagerXL.");
 		if (index != -1) {
-			config.remove(index);
+			removeLine(index);
 		}
 
 		index = indexOfStart("# If the player \"wakes up\" at a random place when offline for some time while drinking (the places have to be defined with '/br Wakeup add'");
@@ -1221,13 +1313,749 @@ public class ConfigUpdater {
 		if (P.use1_13) updateMaterialDescriptions(false);
 	}
 
+	private void update18de(FileConfiguration yml) {
+		int index = indexOfStart("# Löschen einzelner Einstellungen");
+		if (index != -1) {
+			removeLine(index);
+		}
+
+		addLinesAt(new String[] {"colorInBrewer:", "colorInBarrels:", "hangoverDays:", "language:"}, 1, "",
+				"# Ob in den Iteminformationen immer 1-5 Sterne für die Qualität angezeigt werden sollen, oder nur beim brauen [true]",
+				"alwaysShowQuality: true",
+				"",
+				"# Ob in den Iteminformationen immer der Alkoholgehalt angezeigt weden soll, oder nur im Braustand [false]",
+				"alwaysShowAlc: false");
+
+		addLinesAt(new String[] {"maxBrewsInMCBarrels:", "openLargeBarrelEverywhere:", "language:"}, 1, "",
+			"# Benutzte Zutaten und andere Brau-Daten werden in allen Brewery Tränken gespeichert. Um zu verhindern,",
+				"# dass gehackte clients diese Daten auslesen um Rezepte herauszufinden, können diese encodiert werden.",
+				"# Einziger Nachteil: Tränke können nur auf Servern mit dem gleichen encodeKey benutzt werden.",
+				"# Dies kann also aktiviert werden um Rezept-cheating schwerer zu machen, aber keine Tränke per World Download, Schematic, o.ä. geteilt werden. [false]",
+				"enableEncode: false",
+				"encodeKey: 0");
+
+		if (indexOfStart("debug:") == -1) {
+			addLinesAt(new String[]{"autosave:", "version:"}, 1, "",
+				"# Debug Nachrichten im Log anzeigen [false]",
+				"debug: false");
+		}
+
+		index = indexOfStart("oldMat:") + 1;
+		if (index == 0) {
+			index = indexOfStart("version:") + 1;
+			if (index == 0) {
+				index = 2;
+			}
+		}
+		// Custom Items and start of cauldron section
+		applyPatch("config/patches/de18.txt", index);
+
+		index = indexOfStart("%%%%MAT1%%%%");
+		if (index != -1) {
+			if (P.use1_13) {
+				setLine(index, "    material: Barrier");
+			} else {
+				setLine(index, "    material: BEDROCK");
+			}
+		}
+		index = indexOfStart("%%%%MAT2%%%%");
+		if (index != -1) {
+			removeLine(index);
+			if (P.use1_13) {
+				addLines(index, "    material:",
+					"      - Acacia_Door",
+					"      - Oak_Door",
+					"      - Spruce_Door");
+			} else {
+				addLines(index, "    material:",
+					"      - WOODEN_DOOR",
+					"      - IRON_DOOR");
+			}
+		}
+
+		index = indexOfStart("# -- Eine Zutat:");
+		if (index == -1) {
+			index = indexOfStart("cauldron:");
+			if (index == -1) {
+				// Patch failed
+				index = indexOfStart("version:");
+				if (index == -1) {
+					index = 0;
+				}
+				addLines(index + 1, "cauldron:");
+				index ++;
+			}
+		}
+		convertCookedSection(yml, index + 1);
+
+		addLinesAt(new String[]{"#   Eine Liste von allen Materialien", "# ingredients:"}, 1,
+			"#   Plugin Items mit 'Plugin:Id' (Im Moment ExoticGarden, Slimefun, MMOItems, Brewery)",
+				"#   Oder ein oben definiertes Custom Item");
+
+		addLinesAt(new String[]{"# alcohol:", "# difficulty:", "# ingredients:", "# -- Rezepte"}, 1,
+			"# lore: Auflistung von zusätzlichem Text auf dem fertigen Trank. (Farbcodes möglich: z.b. &6)",
+				"#   Lore nur für bestimmte Qualität möglich mit + Schlecht, ++ Mittel, +++ Gut, vorne anhängen.",
+				"# servercommands: Liste von Befehlen ausgeführt vom Server wenn der Trank getrunken wird",
+				"# playercommands: Liste von Befehlen ausgeführt vom Spieler wenn der Trank getrunken wird",
+				"# drinkmessage: Nachricht im Chat beim trinken des Trankes",
+				"# drinktitle: Nachricht als Titel auf dem Bildschirm an den Spieler beim trinken des Trankes");
+
+		addLinesAt(new String[]{"useGriefPrevention:", "useWorldGuard:", "# -- Plugin Kompatiblit"}, 1, "useGMInventories: true");
+
+		index = indexOfStart("# cooked:");
+		if (index != -1) {
+			removeLine(index);
+		}
+		index = indexOfStart("# [Beispiel] MATERIAL:");
+		if (index != -1) {
+			removeLine(index);
+		}
+
+	}
+
+	private void update18fr(FileConfiguration yml) {
+		int index = indexOfStart("# Supprimer un para");
+		if (index != -1) {
+			removeLine(index);
+		}
+
+		addLinesAt(new String[] {"colorInBrewer:", "colorInBarrels:", "hangoverDays:", "language:"}, 1, "\n" +
+			"# Toujours montrer les 1-5 étoiles sur les objets en fonction de leur qualité. S'ils sont faux, ils n'apparaîtront que lors de l'infusion. [true]",
+			"alwaysShowQuality: true",
+			"",
+			"# Toujours indiquer la teneur en alcool sur les objets. S'il est false, il n'apparaîtra que dans le stand de brassage. [false]",
+			"alwaysShowAlc: false");
+
+		addLinesAt(new String[] {"maxBrewsInMCBarrels:", "openLargeBarrelEverywhere:", "language:"}, 1, "",
+			"# Les ingrédients et autres données de brassage utilisés sont sauvegardés dans tous les articles de brasserie. [false]",
+			"# Pour empêcher les clients piratés de lire exactement ce qui a été utilisé pour infuser un élément, les données peuvent être encodées/brouillées.",
+			"# Il s'agit d'un processus rapide pour empêcher les joueurs de pirater des recettes, une fois qu'ils mettent la main sur une bière.",
+			"# Seul inconvénient: Les boissons brassicoles ne peuvent être utilisés que sur un autre serveur avec la même clé de chiffrement.",
+			"# Activez cette option si vous voulez rendre la tricherie des recettes plus difficile, mais ne partagez pas les infusions par téléchargement mondial, schémas ou autres moyens.",
+			"enableEncode: false",
+			"encodeKey: 0");
+
+		if (indexOfStart("debug:") == -1) {
+			addLinesAt(new String[]{"autosave:", "version:"}, 1, "",
+				"# Show debug messages in log [false]",
+				"debug: false");
+		}
+
+		index = indexOfStart("oldMat:") + 1;
+		if (index == 0) {
+			index = indexOfStart("version:") + 1;
+			if (index == 0) {
+				index = 2;
+			}
+		}
+		// Custom Items and start of cauldron section
+		applyPatch("config/patches/fr18.txt", index);
+
+		index = indexOfStart("%%%%MAT1%%%%");
+		if (index != -1) {
+			if (P.use1_13) {
+				setLine(index, "    material: Barrier");
+			} else {
+				setLine(index, "    material: BEDROCK");
+			}
+		}
+		index = indexOfStart("%%%%MAT2%%%%");
+		if (index != -1) {
+			removeLine(index);
+			if (P.use1_13) {
+				addLines(index, "    material:",
+					"      - Acacia_Door",
+					"      - Oak_Door",
+					"      - Spruce_Door");
+			} else {
+				addLines(index, "    material:",
+					"      - WOODEN_DOOR",
+					"      - IRON_DOOR");
+			}
+		}
+
+		index = indexOfStart("  # -- Un ingr");
+		if (index == -1) {
+			index = indexOfStart("cauldron:");
+			if (index == -1) {
+				// Patch failed
+				index = indexOfStart("version:");
+				if (index == -1) {
+					index = 0;
+				}
+				addLines(index + 1, "cauldron:");
+				index ++;
+			}
+		}
+		convertCookedSection(yml, index + 1);
+
+		addLinesAt(new String[]{"#   Une liste des mat", "# ingredients:"}, 1,
+			"#   Plugin items avec 'plugin:id' (Actuellement supporté ExoticGarden, Slimefun, MMOItems, Brewery)",
+				"#   Ou un élément personnalisé défini ci-dessus");
+
+		addLinesAt(new String[]{"# alcohol:", "# difficulty:", "# ingredients:", "# -- Recette "}, 1,
+			"# lore: Liste des textes supplémentaires sur le breuvage fini. (Codes de formatage possibles : tels que &6)",
+				"#   Texte spécifique de qualité possible, en utilisant + mauvais, ++ normal, +++ bon, ajouté à l'avant de la ligne.",
+				"# servercommands: Liste des commandes exécutées par le serveur lors de la consommation de la potion",
+				"# playercommands: Liste des commandes exécutées par le joueur lors de la consommation de la potion",
+				"# drinkmessage: Chat-message au joueur lorsqu'il boit la potion",
+				"# drinktitle: Titre à l'écran du joueur lorsqu'il boit la potion");
+
+		addLinesAt(new String[]{"useGriefPrevention:", "useWorldGuard:", "# -- Plugin Compatibility"}, 1, "useGMInventories: true");
+
+		index = indexOfStart("# cooked:");
+		if (index != -1) {
+			removeLine(index);
+		}
+		index = indexOfStart("# [Exemple] MATERIEL");
+		if (index != -1) {
+			removeLine(index);
+		}
+
+	}
+
+	private void update18en(FileConfiguration yml) {
+		int index = indexOfStart("# Deleting of single settings");
+		if (index != -1) {
+			removeLine(index);
+		}
+
+		addLinesAt(new String[] {"colorInBrewer:", "colorInBarrels:", "hangoverDays:", "language:"}, 1, "",
+			"# Always show the 1-5 stars on the item depending on the quality. If false, they will only appear when brewing [true]",
+			"alwaysShowQuality: true",
+			"",
+			"# Always show the alcohol content on the item. If false, it will only show in the brewing stand [false]",
+			"alwaysShowAlc: false");
+
+		addLinesAt(new String[] {"maxBrewsInMCBarrels:", "openLargeBarrelEverywhere:", "language:"}, 1, "",
+			"# The used Ingredients and other brewing-data is saved to all Brewery Items. To prevent",
+			"# hacked clients from reading what exactly was used to brew an item, the data can be encoded/scrambled.",
+			"# This is a fast process to stop players from hacking out recipes, once they get hold of a brew.",
+			"# Only drawback: brew items can only be used on another server with the same encodeKey.",
+			"# So enable this if you want to make recipe cheating harder, but don't share any brews by world download, schematics, or other means. [false]",
+			"enableEncode: false",
+			"encodeKey: 0");
+
+		if (indexOfStart("debug:") == -1) {
+			addLinesAt(new String[]{"autosave:", "version:"}, 1, "",
+				"# Show debug messages in log [false]",
+				"debug: false");
+		}
+
+		index = indexOfStart("oldMat:") + 1;
+		if (index == 0) {
+			index = indexOfStart("version:") + 1;
+			if (index == 0) {
+				index = 2;
+			}
+		}
+		// Custom Items and start of cauldron section
+		applyPatch("config/patches/en18.txt", index);
+
+		index = indexOfStart("%%%%MAT1%%%%");
+		if (index != -1) {
+			if (P.use1_13) {
+				setLine(index, "    material: Barrier");
+			} else {
+				setLine(index, "    material: BEDROCK");
+			}
+		}
+		index = indexOfStart("%%%%MAT2%%%%");
+		if (index != -1) {
+			removeLine(index);
+			if (P.use1_13) {
+				addLines(index, "    material:",
+					"      - Acacia_Door",
+					"      - Oak_Door",
+					"      - Spruce_Door");
+			} else {
+				addLines(index, "    material:",
+					"      - WOODEN_DOOR",
+					"      - IRON_DOOR");
+			}
+		}
+
+		index = indexOfStart("  # -- One Ingredient");
+		if (index == -1) {
+			index = indexOfStart("cauldron:");
+			if (index == -1) {
+				// Patch failed
+				index = indexOfStart("version:");
+				if (index == -1) {
+					index = 0;
+				}
+				addLines(index + 1, "cauldron:");
+				index ++;
+			}
+		}
+		convertCookedSection(yml, index + 1);
+
+		addLinesAt(new String[]{"#   A list of materials", "# ingredients:"}, 1,
+			"#   Plugin items with 'plugin:id' (Currently supporting ExoticGarden, Slimefun, MMOItems, Brewery)",
+			"#   Or a custom item defined above");
+
+		addLinesAt(new String[]{"# alcohol:", "# difficulty:", "# ingredients:", "# -- Recipes"}, 1,
+			"# lore: List of additional text on the finished brew. (Formatting codes possible: such as &6)",
+			"#   Specific lore for quality possible, using + bad, ++ normal, +++ good, added to the front of the line.",
+			"# servercommands: List of Commands executed by the Server when drinking the brew",
+			"# playercommands: List of Commands executed by the Player when drinking the brew",
+			"# drinkmessage: Chat-message to the Player when drinking the Brew",
+			"# drinktitle: Title on Screen to the Player when drinking the Brew");
+
+		addLinesAt(new String[]{"useGriefPrevention:", "useWorldGuard:", "# -- Plugin Compatibility"}, 1, "useGMInventories: true");
+
+		index = indexOfStart("# cooked:");
+		if (index != -1) {
+			removeLine(index);
+		}
+		index = indexOfStart("# [Example] MATERIAL:");
+		if (index != -1) {
+			removeLine(index);
+		}
+
+	}
+
+	private void update20de() {
+		addLinesAt(new String[]{"hangoverDays", "colorInBrewer", "encodeKey"}, 1, "",
+			"# Ob das craften und das benutzen des Trank-Versiegelungs-Tisches aktiviert ist (2 Flaschen über 4 Holz) [true, true]",
+			"craftSealingTable: true",
+			"enableSealingTable: true");
+
+		addLinesAt(new String[]{"useLogBlock", "useGMInventories", "# -- Plugin Kompatibli", "# Es gibt noch viele Minecraft Items", "version"}, 1, "", "",
+			"# -- MultiServer/BungeeCord --",
+			"# Wenn Brewery auf mehreren Servern läuft und diese zB mit BungeeCord verbunden sind,",
+			"# sollte hier eine gemeinsame Datenbank eingetragen werden.",
+			"# Dann wird Betrunkenheit auf den Servern synchronisiert und encodierte Tränke können auf allen Servern benutzt werden.",
+			"",
+			"multiServerDB:",
+			"  # Soll die Datenbank-Synchronisation aktiviert sein",
+			"  enabled: false",
+			"  # Soll die Betrunkenheit von Spielern synchronisiert werden",
+			"  syncDrunkeness: true",
+			"  host: localhost",
+			"  port: '3306'",
+			"  user: minec",
+			"  password: xyz",
+			"  database: base",
+			"",
+			"",
+			"# -- Verschiedene weitere Einstellungen --",
+			"",
+			"# Ob Items in der Zweithand auch in den Kessel geworfen werden sollen [false]",
+			"useOffhandForCauldron: false");
+	}
+
+	private void update20fr() {
+		addLinesAt(new String[]{"hangoverDays", "colorInBrewer", "encodeKey"}, 1, "",
+			"# If crafting and using of the Brew Sealing Table is enabled (2 Bottles over 4 Planks) [true, true]",
+			"craftSealingTable: true",
+			"enableSealingTable: true");
+
+		addLinesAt(new String[]{"useLogBlock", "useGMInventories", "# -- Compatibilit", "# There are a lot of items in Minecraft ", "version"}, 1, "", "",
+			"# -- MultiServer/BungeeCord --",
+			"# Si Brewery est exécuté sur plusieurs serveurs connectés (via BungeeCord), une base de données partagée peut être utilisée",
+			"# ici pour synchroniser l'ivresse et pour pouvoir utiliser des boissons codées entre elles.",
+			"",
+			"multiServerDB:",
+			"  # Si l'utilisation de la base de données est activée",
+			"  enabled: false",
+			"  # Si l'ivresse des joueurs devait être synchronisée entre les serveurs",
+			"  syncDrunkeness: true",
+			"  host: localhost",
+			"  port: '3306'",
+			"  user: minec",
+			"  password: xyz",
+			"  database: base",
+			"",
+			"",
+			"# -- Divers autres paramètres --",
+			"",
+			"# If items in Offhand should be added to the cauldron as well [false]",
+			"useOffhandForCauldron: false");
+	}
+
+	private void update20en() {
+		addLinesAt(new String[]{"hangoverDays", "colorInBrewer", "encodeKey"}, 1, "",
+			"# If crafting and using of the Brew Sealing Table is enabled (2 Bottles over 4 Planks) [true, true]",
+			"craftSealingTable: true",
+			"enableSealingTable: true");
+
+		addLinesAt(new String[]{"useLogBlock", "useGMInventories", "# -- Plugin Compatibility", "# # There are a lot of items in Minecraft", "version"}, 1, "", "",
+			"# -- MultiServer/BungeeCord --",
+			"# If Brewery is running on multiple connected Servers (via BungeeCord)",
+			"# a shared Database can be used here to synchronise drunkeness and to be able to use encoded brews between them.",
+			"",
+			"multiServerDB:",
+			"  # If using the Database is enabled",
+			"  enabled: false",
+			"  # If the drunkeness of players should be synchronised between Servers",
+			"  syncDrunkeness: true",
+			"  host: localhost",
+			"  port: '3306'",
+			"  user: minec",
+			"  password: xyz",
+			"  database: base",
+			"",
+			"",
+			"# -- Various Other Settings --",
+			"",
+			"# If items in Offhand should be added to the cauldron as well [false]",
+			"useOffhandForCauldron: false");
+	}
+
+	private void update21de() {
+		int index = indexOfStart("# Wie viele Brewery Getränke in die Minecraft Fässer getan werden können");
+		if (index != -1) {
+			setLine(index, "# Ob das reifen in -Minecraft- Fässern aktiviert ist und wie viele Brewery Getränke in die diese getan werden können [6]");
+		}
+		String add = "ageInMCBarrels: true";
+		index = indexOfStart("maxBrewsInMCBarrels:");
+		if (index != -1) {
+			addLines(index, add);
+		} else {
+			addLinesAt(new String[]{"debug", "version"}, 1, "", add);
+		}
+
+		addLinesAt(new String[]{"# Hier kann angegeben werden welche Zutaten in den Kessel getan werden können"}, 1,
+			"# Es braucht nur etwas hier eingetragen werden falls der Basistrank besondere Eigenschaften wie Name und Farbe haben soll");
+
+		addLinesAt(new String[]{" # lore:", " # ingredients:"}, 1,
+			" # customModelData: Custom Model Data Modelldaten. Mit dieser Zahl kann die Tranktextur mit einem Resourcepack geändert werden");
+
+		index = indexOfStart("# servercommands: Liste von Befehlen ausgeführt vom Server wenn");
+		if (index != -1) {
+			setLine(index, "# servercommands: Liste von Befehlen ausgeführt vom -Server- wenn der Trank getrunken wird (%player_name%  %quality% benutzbar)");
+		}
+		index = indexOfStart("# playercommands: Liste von Befehlen ausgeführt vom Spieler wenn");
+		if (index != -1) {
+			setLine(index, "# playercommands: Liste von Befehlen ausgeführt vom -Spieler- wenn der Trank getrunken wird (%player_name%  %quality% benutzbar)");
+		}
+
+		addLinesAt(new String[]{"# drinktitle:", "# drinkmessage:", "# playercommands:", "# alcohol:"}, 1,
+			"# customModelData: Custom Model Data Modelldaten. Mit dieser Zahl kann die Tranktextur mit einem Resourcepack geändert werden",
+			"#   Es kann eine für alle, oder drei für die qualitäten schlecht/normal/gut agegeben werden, mit / getrennt");
+
+		addLinesAt(new String[]{"useOffhandForCauldron:", "# -- Verschiedene weitere Einstellungen", "# -- Plugin Kompatiblit"}, 1, "",
+			"# Of Fass- und Kesseldaten Async/im Hintergrund geladen werden können [true]",
+			"loadDataAsync: true");
+
+	}
+
+	private void update21fr() {
+		int index = indexOfStart("# Combien de boissons de brasserie peuvent");
+		if (index != -1) {
+			setLine(index, "# Combien de boissons de brasserie peuvent être mises dans les barils -Minecraft- [6]");
+		}
+		String add = "ageInMCBarrels: true";
+		index = indexOfStart("maxBrewsInMCBarrels:");
+		if (index != -1) {
+			addLines(index, add);
+		} else {
+			addLinesAt(new String[]{"debug", "version"}, 1, "", add);
+		}
+
+		addLinesAt(new String[]{"# Quels sont les ingrédients acceptés par le chaudron"}, 1,
+			"# Il vous suffit d'ajouter quelque chose ici si vous voulez spécifier un nom ou une couleur pour la potion de base");
+
+		addLinesAt(new String[]{" # lore:", " # ingredients:"}, 1,
+			" # customModelData: Custom Model Data Tag. This is a number that can be used to add custom textures to the item.");
+
+		index = indexOfStart("# servercommands: Liste des commandes exécutées par le serveur");
+		if (index != -1) {
+			setLine(index, "# servercommands: Liste des commandes exécutées par le -serveur- lors de la consommation de la potion (Peut utiliser %player_name%  %quality%)");
+		}
+		index = indexOfStart("# playercommands: Liste des commandes exécutées par le joueur");
+		if (index != -1) {
+			setLine(index, "# playercommands: Liste des commandes exécutées par le -joueur- lors de la consommation de la potion (Peut utiliser %player_name%  %quality%)");
+		}
+
+		addLinesAt(new String[]{"# drinktitle:", "# drinkmessage:", "# playercommands:", "# alcohol:"}, 1,
+			"# customModelData: Custom Model Data Tag. This is a number that can be used to add custom textures to the item.",
+			"#   Can specify one for all, or one for each quality, separated by /");
+
+		addLinesAt(new String[]{"useOffhandForCauldron:", "# -- Divers autres param", "# -- Compatibilité entre Plugins"}, 1, "",
+			"# If Barrel and Cauldron data can be loaded Async/in the Background [true]",
+			"loadDataAsync: true");
+
+	}
+
+	private void update21en() {
+		int index = indexOfStart("# How many Brewery drinks can be put into");
+		if (index != -1) {
+			setLine(index, "# If aging in -Minecraft- Barrels in enabled [true] and how many Brewery drinks can be put into them [6]");
+		}
+		String add = "ageInMCBarrels: true";
+		index = indexOfStart("maxBrewsInMCBarrels:");
+		if (index != -1) {
+			addLines(index, add);
+		} else {
+			addLinesAt(new String[]{"debug", "version"}, 1, "", add);
+		}
+
+		addLinesAt(new String[]{"# Which Ingredients are accepted by the Cauldron and the base potion resulting"}, 1,
+			"# You only need to add something here if you want to specify a custom name or color for the base potion");
+
+		addLinesAt(new String[]{" # lore:", " # ingredients:"}, 1,
+			" # customModelData: Custom Model Data Tag. This is a number that can be used to add custom textures to the item.");
+
+		index = indexOfStart("# servercommands: List of Commands executed by the Server when drinking");
+		if (index != -1) {
+			setLine(index, "# servercommands: List of Commands executed by the -Server- when drinking the brew (Can use %player_name%  %quality%)");
+		}
+		index = indexOfStart("# playercommands: List of Commands executed by the Player when drinking the brew");
+		if (index != -1) {
+			setLine(index, "# playercommands: List of Commands executed by the -Player- when drinking the brew (Can use %player_name%  %quality%)");
+		}
+
+		addLinesAt(new String[]{"# drinktitle:", "# drinkmessage:", "# playercommands:", "# alcohol:"}, 1,
+			"# customModelData: Custom Model Data Tag. This is a number that can be used to add custom textures to the item.",
+			"#   Can specify one for all, or one for each quality, separated by /");
+
+		addLinesAt(new String[]{"useOffhandForCauldron:", "# -- Various Other Settings", "# -- Plugin Compatibility"}, 1, "",
+			"# If Barrel and Cauldron data can be loaded Async/in the Background [true]",
+			"loadDataAsync: true");
+
+	}
+
+	private void update30CauldronParticles() {
+		int start = config.indexOf("cauldron:");
+		int end = config.indexOf("recipes:");
+		if (start < 0 || end < 0 || start >= end) {
+			return;
+		}
+		String c = "    cookParticles:";
+
+		List<Tuple<String[], String[]>> additions = new ArrayList<>();
+		additions.add(new Tuple<>(
+			new String[]{"  ex:", "  bsp:"},
+			new String[]{c, "      - 'RED/5'", "      - 'WHITE/10'", "      - '800000/25' # maroon"}));
+		additions.add(new Tuple<>(
+			new String[]{"  wheat:", "  wheat:"},
+			new String[]{c, "      - '2d8686/8' # Dark Aqua"}));
+		additions.add(new Tuple<>(
+			new String[]{"  sugarcane:"},
+			new String[]{c, "      - 'f1ffad/4'","      - '858547/10' # dark olive"}));
+		additions.add(new Tuple<>(
+			new String[]{"  sugar:"},
+			new String[]{c, "      - 'WHITE/4'", "      - 'BRIGHT_GREY/25'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  berries:"},
+			new String[]{c, "      - 'ff6666/2' # bright red", "      - 'RED/7'", "      - 'ac6553/13' # brown-red"}));
+		additions.add(new Tuple<>(
+			new String[]{"  grass:"},
+			new String[]{c, "      - 'GREEN/2'", "      - '99ff99/20' # faded green"}));
+		additions.add(new Tuple<>(
+			new String[]{"  rmushroom:"},
+			new String[]{c, "      - 'fab09e/15' # faded red"}));
+		additions.add(new Tuple<>(
+			new String[]{"  bmushroom:"},
+			new String[]{c, "      - 'c68c53/15'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  cocoa:"},
+			new String[]{c, "      - 'a26011/1'", "      - '5c370a/3'", "      - '4d4133/8' # Gray-brown"}));
+		additions.add(new Tuple<>(
+			new String[]{"  milk:"},
+			new String[]{c, "      - 'fbfbd0/1' # yellow-white", "      - 'WHITE/6'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  bl_flow:"},
+			new String[]{c, "      - '0099ff'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  cactus:"},
+			new String[]{c, "      - '00b300/16'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  vine:"},
+			new String[]{c, "      - 'GREEN/2'", "      - '99ff99/20' # faded green"}));
+		additions.add(new Tuple<>(
+			new String[]{"  rot_flesh:"},
+			new String[]{c, "      - '263300/8'", "      - 'BLACK/20'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  cookie:"},
+			new String[]{c, "      - 'a26011/1'", "      - '5c370a/3'", "      - '4d4133/8' # Gray-brown"}));
+		additions.add(new Tuple<>(
+			new String[]{"  Gold_Nugget:"},
+			new String[]{c, "      - 'ffd11a'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  glowstone_dust:"},
+			new String[]{c, "      - 'ffff99/3'", "      - 'd9d926/15' # faded yellow"}));
+		additions.add(new Tuple<>(
+			new String[]{"  applemead_base:", "  apfelmet_basis:"},
+			new String[]{c, "      - 'e1ff4d/4'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  poi_grass:"},
+			new String[]{c, "      - 'GREEN/2'", "      - '99ff99/20' # faded green"}));
+		additions.add(new Tuple<>(
+			new String[]{"  juniper:"},
+			new String[]{c, "      - '00ccff/8'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  gin_base:"},
+			new String[]{c, "      - 'c68c53/15'"}));
+		additions.add(new Tuple<>(
+			new String[]{"  eggnog_base:"},
+			new String[]{c, "      - 'ffecb3/2'"}));
+
+
+		for (Tuple<String[], String[]> addition : additions) {
+			end = config.indexOf("recipes:");
+			int index = indexOfStart(addition.a()[0]);
+			if (index == -1 && addition.a().length > 1) {
+				index = indexOfStart(addition.a()[1]);
+			}
+			if (index >= start && index <= end) {
+				if (config.get(++index).startsWith("    name:")) {
+					if (config.get(++index).startsWith("    ingredients:")) {
+						// If this is the ingredients line, check if the next line is color or empty
+						// We can safely go after color, or before empty
+						// If neither, go before this line, as ingredients could be multi line
+						if (config.get(index + 1).startsWith("    color:")) {
+							index += 2;
+						} else if (config.get(index + 1).equals("")) {
+							index += 1;
+						}
+					}
+					addLines(index, addition.b());
+				}
+			}
+		}
+	}
+
+	private void update30de() {
+		addLinesAt(new String[]{"pukeDespawntime:", "enableKickOnOverdrink:", "language:"}, 1,
+			"",
+				"# Wie stark in Prozent der Spieler taumelt, je nach dem wie viel Alkohol er getrunken hat. Kann auf 0 und höher als 100 gesetzt werden",
+				"stumblePercent: 100",
+				"",
+				"# Ob seine Betrunkenheit dem Spieler kurz angezeigt werden soll wenn er etwas trinkt oder ein drainItem isst. [true]",
+				"showStatusOnDrink: true");
+		addLinesAt(new String[]{"hangoverDays:", "enableSealingTable:", "showStatusOnDrink:"}, 1,
+			"",
+				"# Partikel steigen von Kesseln auf wenn sie Zutaten und eine Feuerquelle haben [true]",
+				"# Die sich ändernde Farbe der Partikel kann beim Fermentieren mancher Rezepte helfen",
+				"enableCauldronParticles: true");
+		addLinesAt(new String[]{" #   Oder RGB Farben", " #   Eine Liste von allen Materialien", " # lore: Auflistung von zusätzlichem Text"}, 1,
+			" # cookParticles:",
+				" #   Farbe der Partikel über dem Kessel während verschiedener Kochzeiten",
+				" #   Farbe und Minute während die Farbe erscheinen soll. Z.B. eine Farbe bei 8 Minuten, übergehend zu einer anderen bei 18 minuten",
+				" #   Als Liste, jede Farbe als Name oder RGB wie oben. Geschrieben 'Farbe/Minute'",
+				" #   Zum Ende geht es in die letzte Farbe über, gibt es nur eine Farbe in der Liste, wird es von dieser langsam zu grau.");
+		int index = indexOfStart("# wood: Holz des Fasses 0=alle Holzsorten 1=Birke 2=Eiche");
+		if (index > -1) {
+			setLine(index, "# wood: Holz des Fasses 0=alle Holzsorten 1=Birke 2=Eiche 3=Jungel 4=Fichte 5=Akazie 6=Schwarzeiche 7=Karmesin 8=Wirr");
+		}
+		addLinesAt(new String[]{"# playercommands: Liste von Befehlen ausgeführt vom -Spieler-", "# drinktitle: Nachricht als Titel"}, 1, false,
+			"#   Befehle nur für bestimmte Qualität möglich mit + Schlecht, ++ Mittel, +++ Gut, vorne anhängen.");
+		addLinesAt(new String[]{"# Andere Plugins (wenn installiert) nach Rechten zum öffnen von Fässern checken"}, 1, false,
+			"# Plugins 'Landlord' und 'Protection Stones' nutzen WorldGuard. 'ClaimChunk' wird nativ unterstützt.");
+		addLinesAt(new String[]{"useGriefPrevention:", "useLWC:", "useWorldGuard:"}, 1,
+			"useTowny: true",
+				"useBlockLocker: true");
+		addLinesAt(new String[]{"useGMInventories:", "# Plugins 'Landlord' und 'Prote", "# -- Plugin Kompatiblität --"}, 1,
+			"",
+				"# Beim Fass öffnen eine virtuelle Kiste nutzen um Rechte bei allen anderen Plugins abzufragen",
+				"# Könnte Anti-Cheat plugins verwirren aber sonst ok zu aktivieren",
+				"# Diese Option für das Plugin 'Residence' aktivieren, und andere Plugins, die nicht alle Fälle des PlayerInteractEvent checken",
+				"useVirtualChestPerms: false",
+				"");
+		addLinesAt(new String[]{"loadDataAsync:", "useOffhandForCauldron:", "# -- Verschiedene weitere", "useLogBlock:"}, 1,
+			"",
+			"# Ob nur ein Minimum an Kessel-Partikeln dargestellt werden sollen [false]",
+			"minimalParticles: false");
+	}
+
+	private void update30en() {
+		addLinesAt(new String[]{"pukeDespawntime:", "enableKickOnOverdrink:", "language:"}, 1,
+			"",
+				"# How much the Player stumbles depending on the amount of alcohol he drank. Can be set to 0 and higher than 100 [100]",
+				"stumblePercent: 100",
+				"",
+				"# Display his drunkeness to the player when he drinks a brew or eats a drainItem [true]",
+				"showStatusOnDrink: true");
+		addLinesAt(new String[]{"hangoverDays:", "enableSealingTable:", "showStatusOnDrink:"}, 1,
+			"",
+				"# Show Particles over Cauldrons when they have ingredients and a heat source. [true]",
+				"# The changing color of the particles can help with timing some recipes",
+				"enableCauldronParticles: true");
+		addLinesAt(new String[]{" #   Or RGB colors", " #   A list of materials can be found", " # lore: "}, 1,
+			" # cookParticles:",
+				" #   Color of the Particles above the cauldron at different cooking-times",
+				" #   Color and minute during which each color should appear, i.e. one color at 8 minutes fading to another at 18 minutes.",
+				" #   As List, each Color as name or RGB, see above. Written as 'Color/Minute'",
+				" #   It will fade to the last color in the end, if there is only one color in the list, it will fade to grey");
+		int index = indexOfStart("# wood: Wood of the barrel 0=any 1=Birch 2=Oak");
+		if (index > -1) {
+			setLine(index, "# wood: Wood of the barrel 0=any 1=Birch 2=Oak 3=Jungle 4=Spruce 5=Acacia 6=Dark Oak 7=Crimson 8=Warped");
+		}
+		addLinesAt(new String[]{"# playercommands: "}, 1, false,
+			"#   Specific Commands for quality possible, using + bad, ++ normal, +++ good, added to the front of the line.");
+		addLinesAt(new String[]{"# Enable checking of other Plugins (if installed) for"}, 1, false,
+			"# Plugins 'Landlord' and 'Protection Stones' use the WorldGuard Flag. 'ClaimChunk' is natively supported.");
+		addLinesAt(new String[]{"useGriefPrevention:", "useLWC:", "useWorldGuard:"}, 1,
+			"useTowny: true",
+				"useBlockLocker: true");
+		addLinesAt(new String[]{"useGMInventories:", "# Plugins 'Landlord' and 'Protectio", "# -- Plugin Compatibility --"}, 1,
+			"",
+				"# Use a virtual chest when opening a Barrel to check with all other protection plugins",
+				"# This could confuse Anti-Cheat plugins, but is otherwise good to use",
+				"# use this for 'Residence' Plugin and any others that don't check all cases in the PlayerInteractEvent",
+				"useVirtualChestPerms: false",
+				"");
+		addLinesAt(new String[]{"loadDataAsync:", "useOffhandForCauldron:", "# -- Various Other Settings", "useLogBlock:"}, 1,
+			"",
+				"# If Cauldron Particles should be reduced to the bare minimum [false]",
+				"minimalParticles: false");
+	}
+
+
+
+	private void convertCookedSection(FileConfiguration yml, int toLine) {
+		ConfigurationSection cookedSection = yml.getConfigurationSection("cooked");
+		if (cookedSection != null) {
+			for (String ing : cookedSection.getKeys(false)) {
+				String name = cookedSection.getString(ing);
+				addLines(toLine,
+					"  " + ing.toLowerCase() + ":",
+				"    name: " + name,
+				"    ingredients:",
+				"      - " + ing,
+				"");
+				toLine += 5;
+			}
+
+			int index = indexOfStart("cooked:");
+			if (index != -1) {
+				int size = cookedSection.getKeys(false).size();
+				while (size >= 0) {
+					removeLine(index);
+					size--;
+				}
+			}
+		}
+
+
+	}
+
+	public void applyPatch(String resourcePath, int toLine) {
+		try {
+			List<String> patch = new ArrayList<>();
+			BufferedReader reader = new BufferedReader(new InputStreamReader(Objects.requireNonNull(P.p.getResource(resourcePath), "Resource not found")));
+			String currentLine;
+			while((currentLine = reader.readLine()) != null) {
+				patch.add(currentLine);
+			}
+			reader.close();
+			config.addAll(toLine, patch);
+		} catch (IOException | NullPointerException e) {
+			P.p.errorLog("Could not apply Patch: " + resourcePath);
+			e.printStackTrace();
+		}
+	}
+
 	// Update all Materials to Minecraft 1.13
 	private void updateMaterials(boolean toMC113) {
 		int index;
 		if (toMC113) {
 			index = indexOfStart("oldMat:");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 		} else {
 			index = indexOfStart("version:");
@@ -1286,6 +2114,29 @@ public class ConfigUpdater {
 				index++;
 			}
 		}
+
+		index = indexOfStart("cauldron:");
+		if (index != -1) {
+			index++;
+			int endIndex = indexOfStart("recipes:");
+			if (endIndex < index) {
+				endIndex = indexOfStart("      cookingtime:");
+			}
+			if (endIndex < index) {
+				endIndex = indexOfStart("useWorldGuard:");
+			}
+			while (index < endIndex) {
+				if (config.get(index).matches("^\\s+ingredients:.*")) {
+					index++;
+					while (config.get(index).matches("^\\s+- .+")) {
+						line = config.get(index);
+						setLine(index, convertMaterial(line, "^\\s+- ", "(,.*|)/.*", toMC113));
+						index++;
+					}
+				}
+				index++;
+			}
+		}
 	}
 
 	private String convertMaterial(String line, String regexPrefix, String regexPostfix, boolean toMC113) {
@@ -1337,33 +2188,33 @@ public class ConfigUpdater {
 
 			index = indexOfStart("#   Es kann ein Data-Wert (durability) angegeben werden");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 
 			index = indexOfStart("#   Wenn Vault installiert ist");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 
 			index = indexOfStart("#   Vault erkennt Namen wie");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#     - Jungle Leaves/64  # Nur mit Vault");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#     - Green Dye/6       # Nur mit Vault");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#   Ein 'X' an den Namen");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#   Effekte sind ab der 1.9 immer verborgen");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 		} else {
 			index = indexOfStart("# ingredients: List of 'material,data/amount'");
@@ -1373,33 +2224,33 @@ public class ConfigUpdater {
 
 			index = indexOfStart("#   You can specify a data (durability) value");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 
 			index = indexOfStart("#   If Vault is installed normal names can be used");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 
 			index = indexOfStart("#   Vault will recognize things");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#     - Jungle Leaves/64  # Only with Vault");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#     - Green Dye/6       # Only with Vault");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#   Suffix name with 'X' to hide effect");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 			index = indexOfStart("#   Effects are always hidden in 1.9 and newer");
 			if (index != -1) {
-				config.remove(index);
+				removeLine(index);
 			}
 		}
 	}
